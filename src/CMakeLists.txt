@@ -59,3 +59,5 @@ if(MPI)
         target_link_libraries(starsh PUBLIC ${STARPU_MPI_STATIC_LIBRARIES})
     endif()
 endif(MPI)
+
+target_link_libraries(starsh PUBLIC plasma)

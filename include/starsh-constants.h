@@ -56,7 +56,9 @@ enum STARSH_LRENGINE
     STARSH_LRENGINE_RSVD = 3,
     //!< Randomized SVD
     STARSH_LRENGINE_CROSS = 4,
-    //!< Cross approximation
+    //!< Cross approximation,
+    STARSH_LRENGINE_RSVD_POTRF = 5,
+    //!< RSVD and POTRF on the fly
 };
 
 //! Enum for error codes

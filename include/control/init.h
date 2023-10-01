@@ -77,7 +77,7 @@ struct
 };
 
 //! Set number of low-rank engines and default one
-#define LRENGINE_NUM 5
+#define LRENGINE_NUM 6
 #define LRENGINE_DEFAULT STARSH_LRENGINE_RSVD
 //! Array of low-rank engines, presented by string and enum value
 struct
@@ -91,6 +91,7 @@ struct
     {"RRQR", STARSH_LRENGINE_RRQR},
     {"RSVD", STARSH_LRENGINE_RSVD},
     {"CROSS", STARSH_LRENGINE_CROSS},
+    {"RSVD_POTRF", STARSH_LRENGINE_RSVD_POTRF},
 };
 
 //! Parameters of STARS-H
@@ -119,7 +120,7 @@ static STARSH_blrm_approximate *(dlr_omp[LRENGINE_NUM]) =
 {
     #ifdef OPENMP
     starsh_blrm__dsdd_omp, starsh_blrm__dsdd_omp, starsh_blrm__dqp3_omp,
-    starsh_blrm__drsdd_omp, starsh_blrm__drsdd_omp
+    starsh_blrm__drsdd_omp, starsh_blrm__drsdd_omp, starsh_blrm__drsdd_potrf_omp
     #endif
 };
 

@@ -23,6 +23,8 @@
 ##                            PRELIMINARIES                                  ##
 ###############################################################################
 
+add_subdirectory(third_party/plasma)
+
 # Need to identify lowest possible CMake version
 cmake_minimum_required(VERSION 3.2.3)
 

@@ -579,6 +579,8 @@ int starsh_blrm__dsdd_omp(STARSH_blrm **matrix, STARSH_blrf *format,
         int maxrank, double tol, int onfly);
 int starsh_blrm__drsdd_omp(STARSH_blrm **matrix, STARSH_blrf *format,
         int maxrank, double tol, int onfly);
+int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
+                           int maxrank, double tol, int onfly);
 int starsh_blrm__dqp3_omp(STARSH_blrm **matrix, STARSH_blrf *format,
         int maxrank, double tol, int onfly);
 //int starsh_blrm__dna_omp(STARSH_blrm **matrix, STARSH_blrf *format,
