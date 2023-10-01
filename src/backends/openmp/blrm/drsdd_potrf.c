@@ -324,31 +324,29 @@ int PLASMA_dpotrf(PLASMA_enum uplo, int N,
     return status;
 }
 
-int static_gen(struct Param *param) {
+int static_gen_each(struct Param *param, STARSH_int i, STARSH_int j) {
     double tol = param->tol;
     int maxrank = param->maxrank;
     STARSH_int nblocks_far = param->nblocks_far;
     STARSH_int *block_far = param->block_far;
     STARSH_kernel *kernel = param->kernel;
     STARSH_cluster *RC = param->RC, *CC = param->CC;
-    Array **far_U = param->far_U, **far_V = param->far_V, **near_D, **near_D_final;
+    Array **far_U = param->far_U, **far_V = param->far_V, **near_D = param->near_D;
     int *far_rank = param->far_rank;
     const int oversample = param->oversample;
     const int onfly = param->onfly;
 
-    STARSH_int bi;
     void *RD = RC->data, *CD = CC->data;
-    double drsdd_time;
-    double kernel_time;
+    double drsdd_time = 0;
+    double kernel_time = 0;
     int BAD_TILE;
-    int near_D_counter = 0;
-    STARSH_MALLOC(near_D, nblocks_far);
 
-#pragma omp parallel for schedule(dynamic, 1)
-    for (bi = 0; bi < nblocks_far; bi++) {
+    {
+        // TODO (Jie): support symm
+        STARSH_int bi = j + (1 + i) * i / 2;
         // Get indexes of corresponding block row and block column
-        STARSH_int i = block_far[2 * bi];
-        STARSH_int j = block_far[2 * bi + 1];
+        assert(i == block_far[2 * bi]);
+        assert(j == block_far[2 * bi + 1]);
         // Get corresponding sizes and minimum of them
         int nrows = RC->size[i];
         int ncols = CC->size[j];
@@ -396,20 +394,246 @@ int static_gen(struct Param *param) {
         free(iwork);
         if (far_rank[bi] == -1 && !onfly) {
             int shape[2] = {nrows, ncols};
-            // TODO (Jie): fix memory leaking
-            array_from_buffer(near_D + near_D_counter, 2, shape, 'd', 'F', D);
+            // TODO (Jie): fix memory leaking of D
+            array_from_buffer(near_D + bi, 2, shape, 'd', 'F', D);
             kernel(nrows, ncols, RC->pivot + RC->start[i], CC->pivot + CC->start[j],
                    RD, CD, D, nrows);
-            ++near_D_counter;
         } else {
             free(D);
         }
     }
+    return 0;
+}
+
+int static_gen(struct Param *param) {
+    double tol = param->tol;
+    int maxrank = param->maxrank;
+    STARSH_int nblocks_far = param->nblocks_far;
+    STARSH_int *block_far = param->block_far;
+    STARSH_kernel *kernel = param->kernel;
+    STARSH_cluster *RC = param->RC, *CC = param->CC;
+    Array **far_U = param->far_U, **far_V = param->far_V, **near_D, **near_D_final;
+    int *far_rank = param->far_rank;
+    const int oversample = param->oversample;
+    const int onfly = param->onfly;
+
+    void *RD = RC->data, *CD = CC->data;
+    double drsdd_time;
+    double kernel_time;
+    int BAD_TILE;
+    STARSH_MALLOC(near_D, nblocks_far);
+    param->near_D = near_D;
+
+    for (STARSH_int i = 0; i < RC->nblocks; ++i) {
+        for (STARSH_int j = 0; j <= i; ++j) {
+            static_gen_each(param, i, j);
+        }
+    }
+    STARSH_int near_D_counter = 0;
+    for (STARSH_int i = 0; i < nblocks_far; ++i) {
+        if (far_rank[i] == -1) {
+            near_D_counter++;
+        }
+    }
+
+
     STARSH_MALLOC(near_D_final, near_D_counter);
-    memcpy(near_D_final, near_D, near_D_counter * sizeof(*near_D));
+    near_D_counter = 0;
+    for (STARSH_int i = 0; i < nblocks_far; ++i) {
+        if (far_rank[i] == -1) {
+            near_D_final[near_D_counter] = near_D[i];
+            near_D_counter++;
+        }
+    }
     free(near_D);
     param->near_D = near_D_final;
     return 0;
+}
+
+void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
+    struct Param *param = plasma->aux;
+    PLASMA_enum uplo;
+    PLASMA_desc A;
+    PLASMA_sequence *sequence;
+    PLASMA_request *request;
+
+
+    double tol = param->tol;
+    int maxrank = param->maxrank;
+    STARSH_int nblocks_far = param->nblocks_far;
+    STARSH_int *block_far = param->block_far;
+    STARSH_kernel *kernel = param->kernel;
+    STARSH_cluster *RC = param->RC, *CC = param->CC;
+    Array **far_U = param->far_U, **far_V = param->far_V, **near_D, **near_D_final;
+    int *far_rank = param->far_rank;
+    const int oversample = param->oversample;
+    const int onfly = param->onfly;
+
+    STARSH_int bi;
+    void *RD = RC->data, *CD = CC->data;
+    double drsdd_time;
+    double kernel_time;
+    int BAD_TILE;
+    int near_D_counter = 0;
+    near_D = malloc(nblocks_far * sizeof(*near_D));
+
+
+    int k, m, n;
+    int next_k;
+    int next_m;
+    int next_n;
+    int ldak, ldam, ldan;
+    int info;
+    int tempkn, tempmn;
+
+    double zone = (double) 1.0;
+    double mzone = (double) -1.0;
+
+    plasma_unpack_args_4(uplo, A, sequence, request);
+    if (sequence->status != PLASMA_SUCCESS)
+        return;
+    ss_init(A.nt, A.nt, 0);
+
+    k = 0;
+    m = PLASMA_RANK;
+    while (m >= A.nt) {
+        k++;
+        m = m - A.nt + k;
+    }
+    n = 0;
+
+    while (k < A.nt && m < A.nt && !ss_aborted()) {
+        next_n = n;
+        next_m = m;
+        next_k = k;
+
+        next_n++;
+        if (next_n > next_k) {
+            next_m += PLASMA_SIZE;
+            while (next_m >= A.nt && next_k < A.nt) {
+                next_k++;
+                next_m = next_m - A.nt + next_k;
+            }
+            next_n = 0;
+        }
+
+        tempkn = k == A.nt - 1 ? A.n - k * A.nb : A.nb;
+        tempmn = m == A.nt - 1 ? A.n - m * A.nb : A.nb;
+
+        ldak = BLKLDD(A, k);
+        ldan = BLKLDD(A, n);
+        ldam = BLKLDD(A, m);
+
+        if (m == k) {
+            if (n == k) {
+                /*
+                 *  PlasmaLower
+                 */
+                if (uplo == PlasmaLower) {
+                    CORE_dpotrf(
+                            PlasmaLower,
+                            tempkn,
+                            A(k, k), ldak,
+                            &info);
+                }
+                    /*
+                     *  PlasmaUpper
+                     */
+                else {
+                    CORE_dpotrf(
+                            PlasmaUpper,
+                            tempkn,
+                            A(k, k), ldak,
+                            &info);
+                }
+                if (info != 0) {
+                    plasma_request_fail(sequence, request, info + A.nb * k);
+                    ss_abort();
+                }
+                ss_cond_set(k, k, 1);
+            } else {
+                ss_cond_wait(k, n, 1);
+                /*
+                 *  PlasmaLower
+                 */
+                if (uplo == PlasmaLower) {
+                    CORE_dsyrk(
+                            PlasmaLower, PlasmaNoTrans,
+                            tempkn, A.nb,
+                            -1.0, A(k, n), ldak,
+                            1.0, A(k, k), ldak);
+                }
+                    /*
+                     *  PlasmaUpper
+                     */
+                else {
+                    CORE_dsyrk(
+                            PlasmaUpper, PlasmaTrans,
+                            tempkn, A.nb,
+                            -1.0, A(n, k), ldan,
+                            1.0, A(k, k), ldak);
+                }
+            }
+        } else {
+            if (n == k) {
+                ss_cond_wait(k, k, 1);
+                /*
+                 *  PlasmaLower
+                 */
+                if (uplo == PlasmaLower) {
+                    CORE_dtrsm(
+                            PlasmaRight, PlasmaLower, PlasmaTrans, PlasmaNonUnit,
+                            tempmn, A.nb,
+                            zone, A(k, k), ldak,
+                            A(m, k), ldam);
+                }
+                    /*
+                     *  PlasmaUpper
+                     */
+                else {
+                    CORE_dtrsm(
+                            PlasmaLeft, PlasmaUpper, PlasmaTrans, PlasmaNonUnit,
+                            A.nb, tempmn,
+                            zone, A(k, k), ldak,
+                            A(k, m), ldak);
+                }
+                ss_cond_set(m, k, 1);
+            } else {
+                ss_cond_wait(k, n, 1);
+                ss_cond_wait(m, n, 1);
+                /*
+                 *  PlasmaLower
+                 */
+                if (uplo == PlasmaLower) {
+                    CORE_dgemm(
+                            PlasmaNoTrans, PlasmaTrans,
+                            tempmn, A.nb, A.nb,
+                            mzone, A(m, n), ldam,
+                            A(k, n), ldak,
+                            zone, A(m, k), ldam);
+                }
+                    /*
+                     *  PlasmaUpper
+                     */
+                else {
+                    CORE_dgemm(
+                            PlasmaTrans, PlasmaNoTrans,
+                            A.nb, tempmn, A.nb,
+                            mzone, A(n, k), ldan,
+                            A(n, m), ldan,
+                            zone, A(k, m), ldak);
+                }
+            }
+        }
+        n = next_n;
+        m = next_m;
+        k = next_k;
+    }
+    ss_finalize();
+    near_D_final = malloc(near_D_counter * sizeof(near_D_final));
+    memcpy(near_D_final, near_D, near_D_counter * sizeof(*near_D));
+    free(near_D);
+    param->near_D = near_D_final;
 }
 
 int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
