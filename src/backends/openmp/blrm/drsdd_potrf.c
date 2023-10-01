@@ -24,7 +24,7 @@ struct Param {
     STARSH_cluster *RC, *CC;
     Array **far_U, **far_V;
     int *far_rank;
-    const int oversample;
+    int oversample;
 };
 
 #define A(m, n) BLKADDR(A, double, m, n)
@@ -323,7 +323,7 @@ int PLASMA_dpotrf(PLASMA_enum uplo, int N,
     return status;
 }
 
-void static_gen(struct Param *param) {
+void static_gen(const struct Param *param, double *drsdd_time, double *kernel_time, int *BAD_TILE) {
     double tol = param->tol;
     int maxrank = param->maxrank;
     STARSH_int nblocks_far = param->nblocks_far;
@@ -336,10 +336,8 @@ void static_gen(struct Param *param) {
 
     STARSH_int bi;
     void *RD = RC->data, *CD = CC->data;
-    int BAD_TILE = 0;
-    double drsdd_time = 0, kernel_time = 0;
-    int m = 0, n = 0, k = 0;
 
+#pragma omp parallel for schedule(dynamic, 1)
     for (bi = 0; bi < nblocks_far; bi++) {
         // Get indexes of corresponding block row and block column
         STARSH_int i = block_far[2 * bi];
@@ -349,7 +347,7 @@ void static_gen(struct Param *param) {
         int ncols = CC->size[j];
         if (nrows != ncols && BAD_TILE == 0) {
 #pragma omp critical
-            BAD_TILE = 1;
+            *BAD_TILE = 1;
             STARSH_WARNING("This was only tested on square tiles, error of "
                            "approximation may be much higher, than demanded");
         }
@@ -383,13 +381,8 @@ void static_gen(struct Param *param) {
         double time2 = omp_get_wtime();
 #pragma omp critical
         {
-            drsdd_time += time2 - time1;
-            kernel_time += time1 - time0;
-        }// Free temporary arrays
-        if (far_rank[bi] == -1) {
-            // refill
-            kernel(nrows, ncols, RC->pivot + RC->start[i], CC->pivot + CC->start[j],
-                   RD, CD, D, nrows);
+            *drsdd_time += time2 - time1;
+            *kernel_time += time1 - time0;
         }
         free(D);
         free(work);
@@ -473,58 +466,21 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
     // Work variables
     int info;
     // Simple cycle over all far-field admissible blocks
-#pragma omp parallel for schedule(dynamic, 1)
-    for (bi = 0; bi < nblocks_far; bi++) {
-        // Get indexes of corresponding block row and block column
-        STARSH_int i = block_far[2 * bi];
-        STARSH_int j = block_far[2 * bi + 1];
-        // Get corresponding sizes and minimum of them
-        int nrows = RC->size[i];
-        int ncols = CC->size[j];
-        if (nrows != ncols && BAD_TILE == 0) {
-#pragma omp critical
-            BAD_TILE = 1;
-            STARSH_WARNING("This was only tested on square tiles, error of "
-                           "approximation may be much higher, than demanded");
-        }
-        int mn = nrows < ncols ? nrows : ncols;
-        int mn2 = maxrank + oversample;
-        if (mn2 > mn)
-            mn2 = mn;
-        // Get size of temporary arrays
-        int lwork = ncols, lwork_sdd = (4 * mn2 + 7) * mn2;
-        if (lwork_sdd > lwork)
-            lwork = lwork_sdd;
-        lwork += (size_t) mn2 * (2 * ncols + nrows + mn2 + 1);
-        int liwork = 8 * mn2;
-        double *D, *work;
-        int *iwork;
-        int info;
-        // Allocate temporary arrays
-        STARSH_PMALLOC(D, (size_t) nrows * (size_t) ncols, info);
-        STARSH_PMALLOC(iwork, liwork, info);
-        STARSH_PMALLOC(work, lwork, info);
-        // Compute elements of a block
-        double time0 = omp_get_wtime();
 
+    struct Param param;
+    param.tol = tol;
+    param.maxrank = maxrank;
+    param.nblocks_far = nblocks_far;
+    param.block_far = block_far;
+    param.kernel = kernel;
+    param.RC = RC;
+    param.CC = CC;
+    param.far_U = far_U;
+    param.far_V = far_V;
+    param.far_rank = far_rank;
+    param.oversample = oversample;
+    static_gen(&param, &drsdd_time, &kernel_time, &BAD_TILE);
 
-        kernel(nrows, ncols, RC->pivot + RC->start[i], CC->pivot + CC->start[j],
-               RD, CD, D, nrows);
-        double time1 = omp_get_wtime();
-        starsh_dense_dlrrsdd(nrows, ncols, D, nrows, far_U[bi]->data, nrows,
-                             far_V[bi]->data, ncols, far_rank + bi, maxrank, oversample, tol,
-                             work, lwork, iwork);
-        double time2 = omp_get_wtime();
-#pragma omp critical
-        {
-            drsdd_time += time2 - time1;
-            kernel_time += time1 - time0;
-        }
-        // Free temporary arrays
-        free(D);
-        free(work);
-        free(iwork);
-    }
     // Get number of false far-field blocks
     STARSH_int nblocks_false_far = 0;
     STARSH_int *false_far = NULL;
