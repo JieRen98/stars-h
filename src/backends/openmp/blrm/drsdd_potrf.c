@@ -371,6 +371,14 @@ int static_gen_each(const struct Param *param, STARSH_int i, STARSH_int j, doubl
         STARSH_PMALLOC(*D, (size_t) nrows * (size_t) ncols, info);
         STARSH_PMALLOC(*iwork, liwork, info);
         STARSH_PMALLOC(*work, lwork, info);
+
+        if (i == j) {
+            // NOTE: will not compress diagonal
+            far_rank[bi] = -1;
+            int shape[2] = {nrows, ncols};
+            // TODO (Jie): fix memory leaking of D
+            array_from_buffer(near_D + bi, 2, shape, 'd', 'F', D);
+        }
         // Compute elements of a block
         double time0 = omp_get_wtime();
 
@@ -593,7 +601,6 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                  */
                 if (uplo == PlasmaLower) {
                     static_gen_each(param, k, k, &D, &work, &iwork);
-                    static_compress_each(param, k, k, D, work, iwork);
                     free(work);
                     free(iwork);
 //                    CORE_dpotrf(
