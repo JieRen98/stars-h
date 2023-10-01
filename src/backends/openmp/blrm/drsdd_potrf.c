@@ -651,6 +651,8 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
     //STARSH_WARNING("DRSDD kernel total time: %e secs", drsdd_time);
     //STARSH_WARNING("MATRIX kernel total time: %e secs", kernel_time);
     PLASMA_Finalize();
+    // TODO (Jie): remove this
+    STARSH_REALLOC(alloc_D, 1);
     return starsh_blrm_new(matrix, F, far_rank, far_U, far_V, onfly, near_D,
                            alloc_U, alloc_V, alloc_D, '1');
 }
