@@ -22,9 +22,10 @@ struct Param {
     STARSH_int *block_far;
     STARSH_kernel *kernel;
     STARSH_cluster *RC, *CC;
-    Array **far_U, **far_V;
+    Array **far_U, **far_V, **near_D;
     int *far_rank;
     int oversample;
+    int onfly;
 };
 
 #define A(m, n) BLKADDR(A, double, m, n)
@@ -323,19 +324,25 @@ int PLASMA_dpotrf(PLASMA_enum uplo, int N,
     return status;
 }
 
-void static_gen(const struct Param *param, double *drsdd_time, double *kernel_time, int *BAD_TILE) {
+int static_gen(struct Param *param) {
     double tol = param->tol;
     int maxrank = param->maxrank;
     STARSH_int nblocks_far = param->nblocks_far;
     STARSH_int *block_far = param->block_far;
     STARSH_kernel *kernel = param->kernel;
     STARSH_cluster *RC = param->RC, *CC = param->CC;
-    Array **far_U = param->far_U, **far_V = param->far_V;
+    Array **far_U = param->far_U, **far_V = param->far_V, **near_D, **near_D_final;
     int *far_rank = param->far_rank;
     const int oversample = param->oversample;
+    const int onfly = param->onfly;
 
     STARSH_int bi;
     void *RD = RC->data, *CD = CC->data;
+    double drsdd_time;
+    double kernel_time;
+    int BAD_TILE;
+    int near_D_counter = 0;
+    STARSH_MALLOC(near_D, nblocks_far);
 
 #pragma omp parallel for schedule(dynamic, 1)
     for (bi = 0; bi < nblocks_far; bi++) {
@@ -347,7 +354,7 @@ void static_gen(const struct Param *param, double *drsdd_time, double *kernel_ti
         int ncols = CC->size[j];
         if (nrows != ncols && BAD_TILE == 0) {
 #pragma omp critical
-            *BAD_TILE = 1;
+            BAD_TILE = 1;
             STARSH_WARNING("This was only tested on square tiles, error of "
                            "approximation may be much higher, than demanded");
         }
@@ -381,13 +388,28 @@ void static_gen(const struct Param *param, double *drsdd_time, double *kernel_ti
         double time2 = omp_get_wtime();
 #pragma omp critical
         {
-            *drsdd_time += time2 - time1;
-            *kernel_time += time1 - time0;
+            drsdd_time += time2 - time1;
+            kernel_time += time1 - time0;
         }
-        free(D);
+
         free(work);
         free(iwork);
+        if (far_rank[bi] == -1 && !onfly) {
+            int shape[2] = {nrows, ncols};
+            // TODO (Jie): fix memory leaking
+            array_from_buffer(near_D + near_D_counter, 2, shape, 'd', 'F', D);
+            kernel(nrows, ncols, RC->pivot + RC->start[i], CC->pivot + CC->start[j],
+                   RD, CD, D, nrows);
+            ++near_D_counter;
+        } else {
+            free(D);
+        }
     }
+    STARSH_MALLOC(near_D_final, near_D_counter);
+    memcpy(near_D_final, near_D, near_D_counter * sizeof(*near_D));
+    free(near_D);
+    param->near_D = near_D_final;
+    return 0;
 }
 
 int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
@@ -479,7 +501,10 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
     param.far_V = far_V;
     param.far_rank = far_rank;
     param.oversample = oversample;
-    static_gen(&param, &drsdd_time, &kernel_time, &BAD_TILE);
+    param.onfly = onfly;
+    static_gen(&param);
+
+    near_D = param.near_D;
 
     // Get number of false far-field blocks
     STARSH_int nblocks_false_far = 0;
@@ -541,46 +566,46 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
         starsh_blrf_free(F2);
     }
     // Compute near-field blocks if needed
-    if (onfly == 0 && new_nblocks_near > 0) {
-        STARSH_MALLOC(near_D, new_nblocks_near);
-        size_t size_D = 0;
-        // Simple cycle over all near-field blocks
-        for (bi = 0; bi < new_nblocks_near; bi++) {
-            // Get indexes of corresponding block row and block column
-            STARSH_int i = block_near[2 * bi];
-            STARSH_int j = block_near[2 * bi + 1];
-            // Get corresponding sizes and minimum of them
-            size_t nrows = RC->size[i];
-            size_t ncols = CC->size[j];
-            // Update size_D
-            size_D += nrows * ncols;
-        }
-        STARSH_MALLOC(alloc_D, size_D);
-        // For each near-field block compute its elements
-        //#pragma omp parallel for schedule(dynamic,1)
-        for (bi = 0; bi < new_nblocks_near; bi++) {
-            // Get indexes of corresponding block row and block column
-            STARSH_int i = block_near[2 * bi];
-            STARSH_int j = block_near[2 * bi + 1];
-            // Get corresponding sizes and minimum of them
-            int nrows = RC->size[i];
-            int ncols = CC->size[j];
-            int shape[2] = {nrows, ncols};
-            double *D;
-#pragma omp critical
-            {
-                D = alloc_D + offset_D;
-                array_from_buffer(near_D + bi, 2, shape, 'd', 'F', D);
-                offset_D += near_D[bi]->size;
-            }
-            double time0 = omp_get_wtime();
-            kernel(nrows, ncols, RC->pivot + RC->start[i],
-                   CC->pivot + CC->start[j], RD, CD, D, nrows);
-            double time1 = omp_get_wtime();
-#pragma omp critical
-            kernel_time += time1 - time0;
-        }
-    }
+//    if (onfly == 0 && new_nblocks_near > 0) {
+//        STARSH_MALLOC(near_D, new_nblocks_near);
+//        size_t size_D = 0;
+//        // Simple cycle over all near-field blocks
+//        for (bi = 0; bi < new_nblocks_near; bi++) {
+//            // Get indexes of corresponding block row and block column
+//            STARSH_int i = block_near[2 * bi];
+//            STARSH_int j = block_near[2 * bi + 1];
+//            // Get corresponding sizes and minimum of them
+//            size_t nrows = RC->size[i];
+//            size_t ncols = CC->size[j];
+//            // Update size_D
+//            size_D += nrows * ncols;
+//        }
+//        STARSH_MALLOC(alloc_D, size_D);
+//        // For each near-field block compute its elements
+//        //#pragma omp parallel for schedule(dynamic,1)
+//        for (bi = 0; bi < new_nblocks_near; bi++) {
+//            // Get indexes of corresponding block row and block column
+//            STARSH_int i = block_near[2 * bi];
+//            STARSH_int j = block_near[2 * bi + 1];
+//            // Get corresponding sizes and minimum of them
+//            int nrows = RC->size[i];
+//            int ncols = CC->size[j];
+//            int shape[2] = {nrows, ncols};
+//            double *D;
+//#pragma omp critical
+//            {
+//                D = alloc_D + offset_D;
+//                array_from_buffer(near_D + bi, 2, shape, 'd', 'F', D);
+//                offset_D += near_D[bi]->size;
+//            }
+//            double time0 = omp_get_wtime();
+//            kernel(nrows, ncols, RC->pivot + RC->start[i],
+//                   CC->pivot + CC->start[j], RD, CD, D, nrows);
+//            double time1 = omp_get_wtime();
+//#pragma omp critical
+//            kernel_time += time1 - time0;
+//        }
+//    }
     // Change sizes of far_rank, far_U and far_V if there were false
     // far-field blocks
     if (nblocks_false_far > 0 && new_nblocks_far > 0) {
