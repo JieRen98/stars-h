@@ -1,3 +1,6 @@
 [submodule "cmake_modules/ecrc"]
 	path = cmake_modules/ecrc
 	url = https://github.com/ecrc/ecrc_cmake
+[submodule "third_party/plasma"]
+	path = third_party/plasma
+	url = git@github.com:JieRen98/plasma.git
