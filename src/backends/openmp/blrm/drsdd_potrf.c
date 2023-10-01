@@ -324,7 +324,7 @@ int PLASMA_dpotrf(PLASMA_enum uplo, int N,
     return status;
 }
 
-int static_gen_each(struct Param *param, STARSH_int i, STARSH_int j) {
+int static_gen_each(const struct Param *param, STARSH_int i, STARSH_int j) {
     double tol = param->tol;
     int maxrank = param->maxrank;
     STARSH_int nblocks_far = param->nblocks_far;
@@ -451,7 +451,7 @@ int static_gen(struct Param *param) {
 }
 
 void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
-    struct Param *param = plasma->aux;
+    const struct Param *param = plasma->aux;
     PLASMA_enum uplo;
     PLASMA_desc A;
     PLASMA_sequence *sequence;
@@ -469,13 +469,11 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
     const int oversample = param->oversample;
     const int onfly = param->onfly;
 
-    STARSH_int bi;
     void *RD = RC->data, *CD = CC->data;
     double drsdd_time;
     double kernel_time;
     int BAD_TILE;
-    int near_D_counter = 0;
-    near_D = malloc(nblocks_far * sizeof(*near_D));
+    near_D = param->near_D;
 
 
     int k, m, n;
@@ -483,13 +481,18 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
     int next_m;
     int next_n;
     int ldak, ldam, ldan;
-    int info;
+    int info = 0;
     int tempkn, tempmn;
 
     double zone = (double) 1.0;
     double mzone = (double) -1.0;
 
-    plasma_unpack_args_4(uplo, A, sequence, request);
+    plasma_unpack_args_3(uplo, sequence, request);
+
+    A.nt = RC->nblocks;
+    A.nb = RC->size[0];
+    A.n = RC->ndata;
+
     if (sequence->status != PLASMA_SUCCESS)
         return;
     ss_init(A.nt, A.nt, 0);
@@ -530,11 +533,12 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                  *  PlasmaLower
                  */
                 if (uplo == PlasmaLower) {
-                    CORE_dpotrf(
-                            PlasmaLower,
-                            tempkn,
-                            A(k, k), ldak,
-                            &info);
+                    static_gen_each(param, k, k);
+//                    CORE_dpotrf(
+//                            PlasmaLower,
+//                            tempkn,
+//                            A(k, k), ldak,
+//                            &info);
                 }
                     /*
                      *  PlasmaUpper
@@ -557,11 +561,11 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                  *  PlasmaLower
                  */
                 if (uplo == PlasmaLower) {
-                    CORE_dsyrk(
-                            PlasmaLower, PlasmaNoTrans,
-                            tempkn, A.nb,
-                            -1.0, A(k, n), ldak,
-                            1.0, A(k, k), ldak);
+//                    CORE_dsyrk(
+//                            PlasmaLower, PlasmaNoTrans,
+//                            tempkn, A.nb,
+//                            -1.0, A(k, n), ldak,
+//                            1.0, A(k, k), ldak);
                 }
                     /*
                      *  PlasmaUpper
@@ -581,11 +585,12 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                  *  PlasmaLower
                  */
                 if (uplo == PlasmaLower) {
-                    CORE_dtrsm(
-                            PlasmaRight, PlasmaLower, PlasmaTrans, PlasmaNonUnit,
-                            tempmn, A.nb,
-                            zone, A(k, k), ldak,
-                            A(m, k), ldam);
+                    static_gen_each(param, m, k);
+//                    CORE_dtrsm(
+//                            PlasmaRight, PlasmaLower, PlasmaTrans, PlasmaNonUnit,
+//                            tempmn, A.nb,
+//                            zone, A(k, k), ldak,
+//                            A(m, k), ldam);
                 }
                     /*
                      *  PlasmaUpper
@@ -605,12 +610,12 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                  *  PlasmaLower
                  */
                 if (uplo == PlasmaLower) {
-                    CORE_dgemm(
-                            PlasmaNoTrans, PlasmaTrans,
-                            tempmn, A.nb, A.nb,
-                            mzone, A(m, n), ldam,
-                            A(k, n), ldak,
-                            zone, A(m, k), ldam);
+//                    CORE_dgemm(
+//                            PlasmaNoTrans, PlasmaTrans,
+//                            tempmn, A.nb, A.nb,
+//                            mzone, A(m, n), ldam,
+//                            A(k, n), ldak,
+//                            zone, A(m, k), ldam);
                 }
                     /*
                      *  PlasmaUpper
@@ -630,10 +635,124 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
         k = next_k;
     }
     ss_finalize();
+}
+
+void drsdd_pdpotrf_testing_quark(PLASMA_enum uplo,
+                                 PLASMA_sequence *sequence,
+                                 PLASMA_request *request) {
+    abort();
+}
+
+int OURS_dpotrf_Tile_Async(PLASMA_enum uplo, PLASMA_sequence *sequence, PLASMA_request *request) {
+    plasma_context_t *plasma;
+
+    plasma = plasma_context_self();
+    if (plasma == NULL) {
+        plasma_fatal_error("PLASMA_dpotrf_Tile_Async", "PLASMA not initialized");
+        return PLASMA_ERR_NOT_INITIALIZED;
+    }
+    if (sequence == NULL) {
+        plasma_fatal_error("PLASMA_dpotrf_Tile_Async", "NULL sequence");
+        return PLASMA_ERR_UNALLOCATED;
+    }
+    if (request == NULL) {
+        plasma_fatal_error("PLASMA_dpotrf_Tile_Async", "NULL request");
+        return PLASMA_ERR_UNALLOCATED;
+    }
+    /* Check sequence status */
+    if (sequence->status == PLASMA_SUCCESS)
+        request->status = PLASMA_SUCCESS;
+    else
+        return plasma_request_fail(sequence, request, PLASMA_ERR_SEQUENCE_FLUSHED);
+
+    if (uplo != PlasmaUpper && uplo != PlasmaLower) {
+        plasma_error("PLASMA_dpotrf_Tile_Async", "illegal value of uplo");
+        return plasma_request_fail(sequence, request, -1);
+    }
+    /* Quick return */
+/*
+    if (max(N, 0) == 0)
+        return PLASMA_SUCCESS;
+*/
+    // TODO (Jie): may support dynamic
+    plasma->scheduling = 1;
+    plasma_parallel_call_3(drsdd_pdpotrf_testing,
+                           PLASMA_enum, uplo,
+                           PLASMA_sequence*, sequence,
+                           PLASMA_request*, request);
+
+    return PLASMA_SUCCESS;
+}
+
+int OURS_dpotrf(PLASMA_enum uplo, struct Param *param) {
+    double tol = param->tol;
+    int maxrank = param->maxrank;
+    STARSH_int nblocks_far = param->nblocks_far;
+    STARSH_int *block_far = param->block_far;
+    STARSH_kernel *kernel = param->kernel;
+    STARSH_cluster *RC = param->RC, *CC = param->CC;
+    Array **far_U = param->far_U, **far_V = param->far_V, **near_D, **near_D_final;
+    int *far_rank = param->far_rank;
+    const int oversample = param->oversample;
+    const int onfly = param->onfly;
+
+    void *RD = RC->data, *CD = CC->data;
+    double drsdd_time;
+    double kernel_time;
+    int BAD_TILE;
+    near_D = malloc(nblocks_far * sizeof(*near_D));
+    param->near_D = near_D;
+
+    int NB;
+    int status;
+    plasma_context_t *plasma;
+    PLASMA_sequence *sequence = NULL;
+    PLASMA_request request = PLASMA_REQUEST_INITIALIZER;
+
+    plasma = plasma_context_self();
+    plasma->aux = param;
+    if (plasma == NULL) {
+        plasma_fatal_error("PLASMA_dpotrf", "PLASMA not initialized");
+        return PLASMA_ERR_NOT_INITIALIZED;
+    }
+    /* Check input arguments */
+    if (uplo != PlasmaUpper && uplo != PlasmaLower) {
+        plasma_error("PLASMA_dpotrf", "illegal value of uplo");
+        return -1;
+    }
+
+    /* Set NT */
+    NB = PLASMA_NB;
+
+    plasma_sequence_create(plasma, &sequence);
+
+    /* Call the tile interface */
+    OURS_dpotrf_Tile_Async(uplo, sequence, &request);
+
+    plasma_dynamic_sync();
+
+    status = sequence->status;
+    plasma_sequence_destroy(plasma, sequence);
+
+    STARSH_int near_D_counter = 0;
+    for (STARSH_int i = 0; i < nblocks_far; ++i) {
+        if (far_rank[i] == -1) {
+            near_D_counter++;
+        }
+    }
+
     near_D_final = malloc(near_D_counter * sizeof(near_D_final));
-    memcpy(near_D_final, near_D, near_D_counter * sizeof(*near_D));
+    near_D_counter = 0;
+    for (STARSH_int i = 0; i < nblocks_far; ++i) {
+        if (far_rank[i] == -1) {
+            near_D_final[near_D_counter] = near_D[i];
+            near_D_counter++;
+        }
+    }
     free(near_D);
     param->near_D = near_D_final;
+
+    return status;
 }
 
 int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
@@ -726,7 +845,8 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
     param.far_rank = far_rank;
     param.oversample = oversample;
     param.onfly = onfly;
-    static_gen(&param);
+    OURS_dpotrf(PlasmaLower, &param);
+//    static_gen(&param);
 
     near_D = param.near_D;
 
