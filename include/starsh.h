@@ -534,6 +534,7 @@ struct starsh_blrm
     //!< Total size of block low-rank matrix, including auxiliary buffers.
     size_t data_nbytes;
     //!< Size of low-rank factors and dense blocks in block low-rank matrix.
+    int factorized;
 };
 
 int starsh_blrm_new(STARSH_blrm **matrix, STARSH_blrf *format, int *far_rank,

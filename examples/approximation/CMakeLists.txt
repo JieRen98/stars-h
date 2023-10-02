@@ -16,6 +16,7 @@ if(OPENMP)
     list(APPEND examples_files
         "spatial.c"
         "randtlr.c"
+        "randtlr_potrf.c"
         "minimal.c"
         "dense.c"
     )

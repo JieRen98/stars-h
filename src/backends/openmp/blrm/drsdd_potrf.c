@@ -373,9 +373,8 @@ int static_malloc_each(const struct Param *param, STARSH_int i, STARSH_int j) {
         int info;
         // Allocate temporary arrays
         double *data;
-        double *work;
-        int *iwork;
         STARSH_PMALLOC(data, (size_t) nrows * (size_t) ncols, info);
+        memset(data, 0, (size_t) nrows * (size_t) ncols * sizeof(*data));
 
 
         far_rank[bi] = -1;
@@ -493,8 +492,11 @@ int static_compress_each(const struct Param *param, STARSH_int i, STARSH_int j) 
         double *D = near_D[bi]->data;
         double *work;
         int *iwork;
+        double *backup;
         STARSH_PMALLOC(work, lwork, info);
         STARSH_PMALLOC(iwork, liwork, info);
+        STARSH_PMALLOC(backup, (size_t)ncols * (size_t)nrows, info);
+        memcpy(backup, D, (size_t)ncols * (size_t)nrows * sizeof(D));
 
         double time1 = omp_get_wtime();
         starsh_dense_dlrrsdd(nrows, ncols, D, nrows, far_U[bi]->data, nrows,
@@ -509,16 +511,15 @@ int static_compress_each(const struct Param *param, STARSH_int i, STARSH_int j) 
         free(work);
         free(iwork);
 
-//        far_rank[bi] = -1;
+        far_rank[bi] = -1;
         // Compute elements of a block
         if (far_rank[bi] == -1 && !onfly) {
-            int shape[2] = {nrows, ncols};
-            kernel(nrows, ncols, RC->pivot + RC->start[i], CC->pivot + CC->start[j],
-                   RD, CD, D, nrows);
+            memcpy(D, backup, (size_t)ncols * (size_t)nrows * sizeof(D));
         } else {
             free(D);
             near_D[bi]->data = NULL;
         }
+        free(backup);
     }
     return 0;
 }
@@ -985,8 +986,8 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
     param.far_rank = far_rank;
     param.oversample = oversample;
     param.onfly = onfly;
-//    OURS_dpotrf(PlasmaLower, &param);
-    static_gen(&param);
+    OURS_dpotrf(PlasmaLower, &param);
+//    static_gen(&param);
 
     near_D = param.near_D;
 
@@ -1139,6 +1140,7 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
     info =  starsh_blrm_new(matrix, F, far_rank, far_U, far_V, onfly, near_D,
                            alloc_U, alloc_V, (void *)1, '1');
     (*matrix)->alloc_D = NULL;
+    (*matrix)->factorized = 1;
     return info;
 }
 

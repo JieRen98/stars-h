@@ -58,6 +58,7 @@ enum STARSH_RANDTLR_KERNEL
  * */
 {
     STARSH_RANDTLR_KERNEL1 = 1,
+    STARSH_RANDTLR_ACCUMULATE_KERNEL1 = 2,
     //!< The only kernel.
 };
 
@@ -94,5 +95,9 @@ void starsh_randtlr_free(STARSH_randtlr *data);
 void starsh_randtlr_block_kernel(int nrows, int ncols, STARSH_int *irow,
         STARSH_int *icol, void *row_data, void *col_data, void *result,
         int ld);
+
+void starsh_randtlr_block_accumulate_kernel(int nrows, int ncols, STARSH_int *irow,
+                                 STARSH_int *icol, void *row_data, void *col_data, void *result,
+                                 int ld);
 
 #endif // __STARSH_RANDTLR_H__

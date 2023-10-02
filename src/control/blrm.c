@@ -124,6 +124,7 @@ int starsh_blrm_new(STARSH_blrm **matrix, STARSH_blrf *format, int *far_rank,
     }
     M->nbytes = size;
     M->data_nbytes = data_size;
+    M->factorized = 0;
     return STARSH_SUCCESS;
 }
 

@@ -14,6 +14,48 @@
 #include "starsh.h"
 #include "starsh-randtlr.h"
 
+void starsh_randtlr_block_accumulate_kernel(int nrows, int ncols, STARSH_int *irow,
+                                 STARSH_int *icol, void *row_data, void *col_data, void *result,
+                                 int ld)
+//! The only kernel for @ref STARSH_randtlr object.
+/*! @param[in] nrows: Number of rows of \f$ A \f$.
+ * @param[in] ncols: Number of columns of \f$ A \f$.
+ * @param[in] irow: Array of row indexes.
+ * @param[in] icol: Array of column indexes.
+ * @param[in] row_data: Pointer to physical data (@ref STARSH_randtlr object).
+ * @param[in] col_data: Pointer to physical data (@ref STARSH_randtlr object).
+ * @param[out] result: Pointer to memory of \f$ A \f$.
+ * @param[in] ld: Leading dimension of `result`.
+ * @ingroup app-randtlr
+ * */
+{
+    STARSH_randtlr *data = row_data;
+    STARSH_int count = data->count;
+    STARSH_int nblocks = data->nblocks;
+    STARSH_int block_size = data->block_size;
+    double diag = data->diag;
+    double *U = data->U;
+    double *S = data->S;
+    double *buffer = result;
+    for(STARSH_int i = 0; i < nrows; i++)
+    {
+        STARSH_int ii = irow[i];
+        STARSH_int ibrow = ii/block_size;
+        for(STARSH_int j = 0; j < ncols; j++)
+        {
+            STARSH_int jj = icol[j];
+            STARSH_int jbcol = jj/block_size;
+            double res = 0;
+            for(STARSH_int k = 0; k < block_size; k++)
+                res += U[ii+k*count]*U[jj+k*count]*S[k];
+            if(ii == jj)
+                buffer[j*(size_t)ld+i] += res+diag;
+            else
+                buffer[j*(size_t)ld+i] += res;
+        }
+    }
+}
+
 void starsh_randtlr_block_kernel(int nrows, int ncols, STARSH_int *irow,
         STARSH_int *icol, void *row_data, void *col_data, void *result,
         int ld)
@@ -229,6 +271,9 @@ int starsh_randtlr_get_kernel(STARSH_kernel **kernel, STARSH_randtlr *data,
     {
         case STARSH_RANDTLR_KERNEL1:
             *kernel = starsh_randtlr_block_kernel;
+            break;
+        case STARSH_RANDTLR_ACCUMULATE_KERNEL1:
+            *kernel = starsh_randtlr_block_accumulate_kernel;
             break;
         default:
             STARSH_ERROR("Wrong type of kernel");
