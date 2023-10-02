@@ -718,12 +718,12 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                         static_malloc_each(param, m, k);
                     }
                     static_gen_each(param, m, k);
-                    static_compress_each(param, m, k);
                     CORE_dtrsm(
                             PlasmaRight, PlasmaLower, PlasmaTrans, PlasmaNonUnit,
                             tempmn, A.nb,
                             zone, near_D[twoD_2_oneD(k, k)]->data, ldak,
                             near_D[twoD_2_oneD(m, k)]->data, ldam);
+                    static_compress_each(param, m, k);
                     if (k != (A.nt - 1)) {
                         static_malloc_each(param, m, k + 1);
                     }
