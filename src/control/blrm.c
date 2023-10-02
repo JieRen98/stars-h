@@ -165,6 +165,12 @@ void starsh_blrm_free(STARSH_blrm *matrix)
     }
     if(F->nblocks_near > 0 && M->onfly == 0)
     {
+        if (1) {
+            for(bi = 0; bi < F->nblocks_near; bi++)
+            {
+                array_free(M->near_D[bi]);
+            }
+        } else
         if(M->alloc_type == '1')
         {
             free(M->alloc_D);

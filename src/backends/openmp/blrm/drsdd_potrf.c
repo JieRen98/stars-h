@@ -324,7 +324,11 @@ int PLASMA_dpotrf(PLASMA_enum uplo, int N,
     return status;
 }
 
-int static_gen_each(const struct Param *param, STARSH_int i, STARSH_int j, double **D, double ** work, int **iwork) {
+STARSH_int twoD_2_oneD(STARSH_int i, STARSH_int j) {
+    return j + (1 + i) * i / 2;
+}
+
+int static_malloc_each(const struct Param *param, STARSH_int i, STARSH_int j) {
     double tol = param->tol;
     int maxrank = param->maxrank;
     STARSH_int nblocks_far = param->nblocks_far;
@@ -368,23 +372,71 @@ int static_gen_each(const struct Param *param, STARSH_int i, STARSH_int j, doubl
         int liwork = 8 * mn2;
         int info;
         // Allocate temporary arrays
-        STARSH_PMALLOC(*D, (size_t) nrows * (size_t) ncols, info);
-        STARSH_PMALLOC(*iwork, liwork, info);
-        STARSH_PMALLOC(*work, lwork, info);
+        double *data;
+        double *work;
+        int *iwork;
+        STARSH_PMALLOC(data, (size_t) nrows * (size_t) ncols, info);
 
-        if (i == j) {
-            // NOTE: will not compress diagonal
-            far_rank[bi] = -1;
-            int shape[2] = {nrows, ncols};
-            // TODO (Jie): fix memory leaking of D
-            array_from_buffer(near_D + bi, 2, shape, 'd', 'F', D);
+
+        far_rank[bi] = -1;
+        int shape[2] = {nrows, ncols};
+        // TODO (Jie): fix memory leaking of D
+        array_from_buffer(near_D + bi, 2, shape, 'd', 'F', data);
+
+    }
+    return 0;
+}
+
+int static_gen_each(const struct Param *param, STARSH_int i, STARSH_int j) {
+    double tol = param->tol;
+    int maxrank = param->maxrank;
+    STARSH_int nblocks_far = param->nblocks_far;
+    STARSH_int *block_far = param->block_far;
+    STARSH_kernel *kernel = param->kernel;
+    STARSH_cluster *RC = param->RC, *CC = param->CC;
+    Array **far_U = param->far_U, **far_V = param->far_V, **near_D = param->near_D;
+    int *far_rank = param->far_rank;
+    const int oversample = param->oversample;
+    const int onfly = param->onfly;
+
+    void *RD = RC->data, *CD = CC->data;
+    double drsdd_time = 0;
+    double kernel_time = 0;
+    int BAD_TILE;
+
+    {
+        // TODO (Jie): support symm
+        STARSH_int bi = j + (1 + i) * i / 2;
+        // Get indexes of corresponding block row and block column
+        assert(i == block_far[2 * bi]);
+        assert(j == block_far[2 * bi + 1]);
+        // Get corresponding sizes and minimum of them
+        int nrows = RC->size[i];
+        int ncols = CC->size[j];
+        if (nrows != ncols && BAD_TILE == 0) {
+#pragma omp critical
+            BAD_TILE = 1;
+            STARSH_WARNING("This was only tested on square tiles, error of "
+                           "approximation may be much higher, than demanded");
         }
+        int mn = nrows < ncols ? nrows : ncols;
+        int mn2 = maxrank + oversample;
+        if (mn2 > mn)
+            mn2 = mn;
+        // Get size of temporary arrays
+        int lwork = ncols, lwork_sdd = (4 * mn2 + 7) * mn2;
+        if (lwork_sdd > lwork)
+            lwork = lwork_sdd;
+        lwork += (size_t) mn2 * (2 * ncols + nrows + mn2 + 1);
+        int liwork = 8 * mn2;
+        int info;
         // Compute elements of a block
         double time0 = omp_get_wtime();
+        double *D = near_D[bi]->data;
 
 
         kernel(nrows, ncols, RC->pivot + RC->start[i], CC->pivot + CC->start[j],
-               RD, CD, *D, nrows);
+               RD, CD, D, nrows);
         double time1 = omp_get_wtime();
 #pragma omp critical
         {
@@ -394,7 +446,7 @@ int static_gen_each(const struct Param *param, STARSH_int i, STARSH_int j, doubl
     return 0;
 }
 
-int static_compress_each(const struct Param *param, STARSH_int i, STARSH_int j, double *D, double *work, int *iwork) {
+int static_compress_each(const struct Param *param, STARSH_int i, STARSH_int j) {
     double tol = param->tol;
     int maxrank = param->maxrank;
     STARSH_int nblocks_far = param->nblocks_far;
@@ -413,7 +465,7 @@ int static_compress_each(const struct Param *param, STARSH_int i, STARSH_int j, 
 
     {
         // TODO (Jie): support symm
-        STARSH_int bi = j + (1 + i) * i / 2;
+        STARSH_int bi = twoD_2_oneD(i, j);
         // Get indexes of corresponding block row and block column
         assert(i == block_far[2 * bi]);
         assert(j == block_far[2 * bi + 1]);
@@ -438,6 +490,12 @@ int static_compress_each(const struct Param *param, STARSH_int i, STARSH_int j, 
         int liwork = 8 * mn2;
         int info;
         // Allocate temporary arrays
+        double *D = near_D[bi]->data;
+        double *work;
+        int *iwork;
+        STARSH_PMALLOC(work, lwork, info);
+        STARSH_PMALLOC(iwork, liwork, info);
+
         double time1 = omp_get_wtime();
         starsh_dense_dlrrsdd(nrows, ncols, D, nrows, far_U[bi]->data, nrows,
                              far_V[bi]->data, ncols, far_rank + bi, maxrank, oversample, tol,
@@ -448,15 +506,18 @@ int static_compress_each(const struct Param *param, STARSH_int i, STARSH_int j, 
             drsdd_time += time2 - time1;
         }
 
+        free(work);
+        free(iwork);
+
+//        far_rank[bi] = -1;
         // Compute elements of a block
         if (far_rank[bi] == -1 && !onfly) {
             int shape[2] = {nrows, ncols};
-            // TODO (Jie): fix memory leaking of D
-            array_from_buffer(near_D + bi, 2, shape, 'd', 'F', D);
             kernel(nrows, ncols, RC->pivot + RC->start[i], CC->pivot + CC->start[j],
                    RD, CD, D, nrows);
         } else {
             free(D);
+            near_D[bi]->data = NULL;
         }
     }
     return 0;
@@ -481,15 +542,11 @@ int static_gen(struct Param *param) {
     STARSH_MALLOC(near_D, nblocks_far);
     param->near_D = near_D;
 
-    double *D, *work;
-    int *iwork;
-
     for (STARSH_int i = 0; i < RC->nblocks; ++i) {
         for (STARSH_int j = 0; j <= i; ++j) {
-            static_gen_each(param, i, j, &D, &work, &iwork);
-            static_compress_each(param, i, j, D, work, iwork);
-            free(work);
-            free(iwork);
+            static_malloc_each(param, i, j);
+            static_gen_each(param, i, j);
+            static_compress_each(param, i, j);
         }
     }
     STARSH_int near_D_counter = 0;
@@ -568,10 +625,6 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
     }
     n = 0;
 
-    double *D;
-    double *work;
-    int *iwork;
-
     while (k < A.nt && m < A.nt && !ss_aborted()) {
         next_n = n;
         next_m = m;
@@ -590,9 +643,9 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
         tempkn = k == A.nt - 1 ? A.n - k * A.nb : A.nb;
         tempmn = m == A.nt - 1 ? A.n - m * A.nb : A.nb;
 
-        ldak = BLKLDD(A, k);
-        ldan = BLKLDD(A, n);
-        ldam = BLKLDD(A, m);
+        ldak = RC->size[k];
+        ldan = RC->size[n];
+        ldam = RC->size[m];
 
         if (m == k) {
             if (n == k) {
@@ -600,9 +653,15 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                  *  PlasmaLower
                  */
                 if (uplo == PlasmaLower) {
-                    static_gen_each(param, k, k, &D, &work, &iwork);
-                    free(work);
-                    free(iwork);
+                    if (k == 0) {
+                        static_malloc_each(param, k, k);
+                    }
+                    static_gen_each(param, k, k);
+                    CORE_dpotrf(
+                            PlasmaLower,
+                            tempkn,
+                            near_D[twoD_2_oneD(k, k)]->data, ldak,
+                            &info);
 //                    CORE_dpotrf(
 //                            PlasmaLower,
 //                            tempkn,
@@ -630,11 +689,11 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                  *  PlasmaLower
                  */
                 if (uplo == PlasmaLower) {
-//                    CORE_dsyrk(
-//                            PlasmaLower, PlasmaNoTrans,
-//                            tempkn, A.nb,
-//                            -1.0, A(k, n), ldak,
-//                            1.0, A(k, k), ldak);
+                    CORE_dsyrk(
+                            PlasmaLower, PlasmaNoTrans,
+                            tempkn, A.nb,
+                            -1.0, near_D[twoD_2_oneD(k, n)]->data, ldak,
+                            1.0, near_D[twoD_2_oneD(k, k)]->data, ldak);
                 }
                     /*
                      *  PlasmaUpper
@@ -654,10 +713,19 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                  *  PlasmaLower
                  */
                 if (uplo == PlasmaLower) {
-                    static_gen_each(param, m, k, &D, &work, &iwork);
-                    static_compress_each(param, m, k, D, work, iwork);
-                    free(work);
-                    free(iwork);
+                    if (k == 0) {
+                        static_malloc_each(param, m, k);
+                    }
+                    static_gen_each(param, m, k);
+                    static_compress_each(param, m, k);
+                    CORE_dtrsm(
+                            PlasmaRight, PlasmaLower, PlasmaTrans, PlasmaNonUnit,
+                            tempmn, A.nb,
+                            zone, near_D[twoD_2_oneD(k, k)]->data, ldak,
+                            near_D[twoD_2_oneD(m, k)]->data, ldam);
+                    if (k != (A.nt - 1)) {
+                        static_malloc_each(param, m, k + 1);
+                    }
 //                    CORE_dtrsm(
 //                            PlasmaRight, PlasmaLower, PlasmaTrans, PlasmaNonUnit,
 //                            tempmn, A.nb,
@@ -682,12 +750,12 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                  *  PlasmaLower
                  */
                 if (uplo == PlasmaLower) {
-//                    CORE_dgemm(
-//                            PlasmaNoTrans, PlasmaTrans,
-//                            tempmn, A.nb, A.nb,
-//                            mzone, A(m, n), ldam,
-//                            A(k, n), ldak,
-//                            zone, A(m, k), ldam);
+                    CORE_dgemm(
+                            PlasmaNoTrans, PlasmaTrans,
+                            tempmn, A.nb, A.nb,
+                            mzone, near_D[twoD_2_oneD(m, n)]->data, ldam,
+                            near_D[twoD_2_oneD(k, n)]->data, ldak,
+                            zone, near_D[twoD_2_oneD(m, k)]->data, ldam);
                 }
                     /*
                      *  PlasmaUpper
@@ -1068,8 +1136,9 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
     //STARSH_WARNING("MATRIX kernel total time: %e secs", kernel_time);
     PLASMA_Finalize();
     // TODO (Jie): remove this
-    STARSH_REALLOC(alloc_D, 1);
-    return starsh_blrm_new(matrix, F, far_rank, far_U, far_V, onfly, near_D,
-                           alloc_U, alloc_V, alloc_D, '1');
+    info =  starsh_blrm_new(matrix, F, far_rank, far_U, far_V, onfly, near_D,
+                           alloc_U, alloc_V, (void *)1, '1');
+    (*matrix)->alloc_D = NULL;
+    return info;
 }
 

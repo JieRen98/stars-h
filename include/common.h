@@ -105,7 +105,7 @@
 
 #define STARSH_PMALLOC(var, expr_nitems, var_info)\
 {\
-    var = malloc(sizeof(*var)*(expr_nitems));\
+    (*((void **)&(var))) = malloc(sizeof(*var)*(expr_nitems));\
     if(!var)\
     {\
         STARSH_ERROR("malloc() failed");\

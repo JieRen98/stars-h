@@ -16,6 +16,7 @@ set(SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/drsdd.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/dsdd.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/dmml.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/dfe.c"
+#    "${CMAKE_CURRENT_SOURCE_DIR}/dfe.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/dfe.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/drsdd_potrf.c"
     PARENT_SCOPE)

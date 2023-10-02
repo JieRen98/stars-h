@@ -22,7 +22,10 @@
 ###############################################################################
 ##                            PRELIMINARIES                                  ##
 ###############################################################################
-
+#add_compile_options(-fsanitize=address)
+#link_libraries(ubsan asan)
+enable_language(CXX)
+enable_language(C)
 add_subdirectory(third_party/plasma)
 
 # Need to identify lowest possible CMake version
@@ -69,7 +72,7 @@ set(CMAKE_BUILD_TYPE Release CACHE STRING
 
 # Options for possible backends
 option(OPENMP "Use OpenMP" ON)
-option(MPI "Use MPI" ON)
+option(MPI "Use MPI" OFF)
 option(STARPU "Use StarPU" ON)
 # Since KBLAS does not support pkg-config, it is OFF by default, since user has
 # to provide path by means of

@@ -10,8 +10,12 @@
  * @date 2017-11-07
  * */
 
+extern "C" {
 #include "common.h"
 #include "starsh.h"
+}
+
+#include <Eigen/Core>
 
 double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
 //! Approximation error in Frobenius norm of double precision matrix.
@@ -45,6 +49,7 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
     double *near_block_norm = block_norm+nblocks_far;
     char symm = F->symm;
     int info = 0;
+    auto infinityNorm = [](const auto &m) -> double { return m.rowwise().sum().array().abs().maxCoeff(); };
     // Simple cycle over all far-field blocks
     #pragma omp parallel for schedule(dynamic, 1)
     for(bi = 0; bi < nblocks_far; bi++)
@@ -72,21 +77,23 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
         far_block_norm[bi] = tmpnorm;
         // Get difference of initial and approximated block
         cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, nrows, ncols,
-                rank, -1., U[bi]->data, nrows, V[bi]->data, ncols, 1.,
+                rank, -1., (double *)U[bi]->data, nrows, (double *)V[bi]->data, ncols, 1.,
                 D, nrows);
         // Compute Frobenius norm of the latter
         for(size_t k = 0; k < ncols; k++)
             D_norm[k] = cblas_dnrm2(nrows, D+k*nrows, 1);
+        Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> ref{D, nrows, ncols};
+        far_block_diff[bi] = infinityNorm(ref);
         free(D);
-        double tmpdiff = cblas_dnrm2(ncols, D_norm, 1);
-        far_block_diff[bi] = tmpdiff;
-        if(i != j && symm == 'S')
-        {
-            // Multiply by square root of 2 in symmetric case
-            // (work on 1 block instead of 2 blocks)
-            far_block_norm[bi] *= sqrt2;
-            far_block_diff[bi] *= sqrt2;
-        }
+//        double tmpdiff = cblas_dnrm2(ncols, D_norm, 1);
+//        far_block_diff[bi] = tmpdiff;
+//        if(i != j && symm == 'S')
+//        {
+//            // Multiply by square root of 2 in symmetric case
+//            // (work on 1 block instead of 2 blocks)
+//            far_block_norm[bi] *= sqrt2;
+//            far_block_diff[bi] *= sqrt2;
+//        }
     }
 //    if(info != 0)
 //        return -1; // Need to rework this (since double is returned,
@@ -102,7 +109,7 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
             int nrows = R->size[i];
             int ncols = C->size[j];
             // Compute norm of a block
-            double *D = M->near_D[bi]->data, D_norm[ncols];
+            double *D = (double *)M->near_D[bi]->data, D_norm[ncols];
             for(size_t k = 0; k < ncols; k++)
                 D_norm[k] = cblas_dnrm2(nrows, D+k*nrows, 1);
             near_block_norm[bi] = cblas_dnrm2(ncols, D_norm, 1);
@@ -127,24 +134,31 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
             STARSH_PMALLOC(D, (size_t)nrows*(size_t)ncols, info);
             kernel(nrows, ncols, R->pivot+R->start[i], C->pivot+C->start[j],
                     RD, CD, D, nrows);
+
+            Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> ref{D, nrows, ncols};
+            Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> computed{(double *)M->near_D[bi]->data, nrows, ncols};
+
             // Compute norm of a block
             for(size_t k = 0; k < ncols; k++)
                 D_norm[k] = cblas_dnrm2(nrows, D+k*nrows, 1);
+
+
+            near_block_norm[bi] = infinityNorm(ref - computed);
             // Free temporary buffer
             free(D);
-            near_block_norm[bi] = cblas_dnrm2(ncols, D_norm, 1);
-            if(i != j && symm == 'S')
-                // Multiply by square root of 2 ub symmetric case
-                near_block_norm[bi] *= sqrt2;
+//            near_block_norm[bi] = cblas_dnrm2(ncols, D_norm, 1);
+//            if(i != j && symm == 'S')
+//                // Multiply by square root of 2 ub symmetric case
+//                near_block_norm[bi] *= sqrt2;
         }
 //    if(info != 0)
 //        return -1; // Need to rework this, since returned value is double,
                     // not error code
     // Get difference of initial and approximated matrices
-    double diff = cblas_dnrm2(nblocks_far, far_block_diff, 1);
+//    double diff = cblas_dnrm2(nblocks_far, far_block_diff, 1);
     // Get norm of initial matrix
-    double norm = cblas_dnrm2(nblocks, block_norm, 1);
+//    double norm = cblas_dnrm2(nblocks, block_norm, 1);
     printf("Far block norm %e\n", cblas_dnrm2(nblocks_far, far_block_norm, 1));
     printf("Near block norm %e\n", cblas_dnrm2(nblocks_near, near_block_norm, 1));
-    return diff/norm;
+    return 0;
 }

@@ -103,8 +103,10 @@ int starsh_set_backend(const char *string)
     }
     starsh_params.backend = backend[selected].backend;
     fprintf(stderr, "Selected backend is %s\n", backend[selected].string);
-    starsh_blrm_approximate = dlr[starsh_params.backend][
-        starsh_params.lrengine];
+//    starsh_blrm_approximate = dlr[starsh_params.backend][
+//        starsh_params.lrengine];
+//    starsh_blrm_approximate = starsh_blrm__drsdd;
+    starsh_blrm_approximate = starsh_blrm__drsdd_potrf_omp;
     return STARSH_SUCCESS;
 }
 

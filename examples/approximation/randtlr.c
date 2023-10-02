@@ -29,7 +29,7 @@ int main(int argc, char **argv)
     // Addition for diagonal elements
     double diag = N;
     // 'N' for nonsymmetric matrix and 'd' for double precision
-    char symm = 'N', dtype = 'd';
+    char symm = 'S', dtype = 'd';
     int ndim = 2;
     STARSH_int shape[2] = {N, N};
     int info;
@@ -98,6 +98,8 @@ int main(int argc, char **argv)
     starsh_blrm_info(matrix); // Show info about approximation
     // Show realtive error of approximation in Frobenius norm
     double rel_err = starsh_blrm__dfe_omp(matrix);
+    starsh_blrf_free(format);
+    starsh_blrm_free(matrix);
     printf("Relative error in Frobenius norm: %e\n", rel_err);
     return 0;
 }
