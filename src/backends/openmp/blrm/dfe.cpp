@@ -42,6 +42,7 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
     STARSH_int nblocks = nblocks_far+nblocks_near;
     // Shortcut to all U and V factors
     Array **U = M->far_U, **V = M->far_V;
+    const struct starsh_block * const block = M->block;
     // Special constant for symmetric case
     double sqrt2 = sqrt(2.);
     // Temporary arrays to compute norms more precisely with dnrm2
@@ -62,7 +63,7 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
                 return j + (1 + i) * i / 2;
             };
             Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> m{
-                    (double *) M->near_D[twoD_2_oneD(k, k)]->data, R->size[k], C->size[k]};
+                    (double *) M->near_D[block[twoD_2_oneD(k, k)].idx_in_near]->data, R->size[k], C->size[k]};
             m.triangularView<Eigen::StrictlyUpper>().setZero();
         }
 
@@ -91,12 +92,59 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
                 };
 
                 for (int k = 0; k <= std::min(i, j); ++k) {
+                    int indexLHS = twoD_2_oneD(i, k);
+                    const int rankLHS = block[indexLHS].rank;
+                    int indexRHS = twoD_2_oneD(j, k);
+                    const int rankRHS = block[indexRHS].rank;
+                    if (rankLHS == -1 && rankRHS == -1) {
+                        // all near
+                        auto nearIdxLHS = block[indexLHS].idx_in_near;
+                        auto nearIdxRHS = block[indexRHS].idx_in_near;
+                        Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> left{
+                                (double *) M->near_D[nearIdxLHS]->data, R->size[i], C->size[k]};
+                        Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> right{
+                                (double *) M->near_D[nearIdxRHS]->data, R->size[j], C->size[k]};
+                        computed += left * right.transpose();
+                    } else if (rankLHS != -1 && rankRHS == -1) {
+                        // LHS far, RHS near
+                        auto farIdxLHS = block[indexLHS].idx_in_far;
+                        auto nearIdxRHS = block[indexRHS].idx_in_near;
+                        Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> U{
+                                (double *) M->far_U[farIdxLHS]->data, R->size[i], rankLHS};
+                        Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> V{
+                                (double *) M->far_V[farIdxLHS]->data, C->size[k], rankLHS};
 
-                    Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> left{
-                            (double *) M->near_D[twoD_2_oneD(i, k)]->data, R->size[i], C->size[k]};
-                    Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> right{
-                            (double *) M->near_D[twoD_2_oneD(j, k)]->data, R->size[j], C->size[k]};
-                    computed += left * right.transpose();
+                        Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> right{
+                                (double *) M->near_D[nearIdxRHS]->data, R->size[j], C->size[k]};
+                        computed += U * V.transpose() * right.transpose();
+                    } else if (rankLHS == -1 && rankRHS != -1) {
+                        // LHS near, RHS far
+                        auto nearIdxLHS = block[indexLHS].idx_in_near;
+                        auto farIdxRHS = block[indexRHS].idx_in_far;
+                        Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> left{
+                                (double *) M->near_D[nearIdxLHS]->data, R->size[i], C->size[k]};
+                        Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> U{
+                                (double *) M->far_U[farIdxRHS]->data, R->size[j], rankLHS};
+                        Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> V{
+                                (double *) M->far_V[farIdxRHS]->data, C->size[k], rankLHS};
+                        computed += left * (U * V.transpose()).transpose();
+                    } else {
+                        auto farIdxLHS = block[indexLHS].idx_in_far;
+                        auto farIdxRHS = block[indexRHS].idx_in_far;
+
+                        Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> UL{
+                                (double *) M->far_U[farIdxLHS]->data, R->size[i], rankLHS};
+                        Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> VL{
+                                (double *) M->far_V[farIdxLHS]->data, C->size[k], rankLHS};
+
+                        Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> UR{
+                                (double *) M->far_U[farIdxRHS]->data, R->size[j], rankLHS};
+                        Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> VR{
+                                (double *) M->far_V[farIdxRHS]->data, C->size[k], rankLHS};
+
+                        computed += UL * VL.transpose() * (UR * VR.transpose()).transpose();
+
+                    }
                 }
 
 //                if (i == 1 && j == 1) {
@@ -110,10 +158,19 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
 //                printf("(%zd, %zd) compute:\n", i, j);
 //                std::cout << computed << std::endl;
 //                printf("(%zd, %zd) factor:\n", i, j);
-//                std::cout << Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> {
-//                        (double *) M->near_D[twoD_2_oneD(i, j)]->data, R->size[i], C->size[j]} << std::endl;
+//                auto b = block[twoD_2_oneD(i, j)];
+//                if (b.rank == -1) {
+//                    std::cout << Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>>{
+//                            (double *) M->near_D[b.idx_in_near]->data, R->size[i], C->size[j]} << std::endl;
+//                } else {
+//                    Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> U{
+//                            (double *) M->far_U[b.idx_in_far]->data, R->size[i], b.rank}, V{(double *) M->far_V[b.idx_in_far]->data, C->size[j], b.rank};
+//                    std::cout << "U: " << std::endl << U << std::endl;
+//                    std::cout << "V: " << std::endl << V << std::endl;
+//                    std::cout << "UVT" << std::endl << U * V.transpose() << std::endl;
+//                }
 
-                near_block_norm[i + j * R->nblocks] = infinityNorm(ref - computed);
+                near_block_norm[twoD_2_oneD(i, j)] = infinityNorm(ref - computed);
 
 //                printf("(%zd, %zd): %e\n", i, j, near_block_norm[bi]);
                 // Free temporary buffer

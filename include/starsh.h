@@ -494,6 +494,12 @@ int starsh_blrf_get_block(STARSH_blrf *format, STARSH_int i, STARSH_int j,
 //! @{
 // This will automatically include all entities between @{ and @} into group.
 
+struct starsh_block {
+    int rank;
+    STARSH_int idx_in_far;
+    STARSH_int idx_in_near;
+};
+
 struct starsh_blrm
 //! Non-nested block low-rank matrix.
 /*! Stores approximation or dense form of each admissible blocks.Division into
@@ -535,6 +541,7 @@ struct starsh_blrm
     size_t data_nbytes;
     //!< Size of low-rank factors and dense blocks in block low-rank matrix.
     int factorized;
+    struct starsh_block const * block;
 };
 
 int starsh_blrm_new(STARSH_blrm **matrix, STARSH_blrf *format, int *far_rank,

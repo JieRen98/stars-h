@@ -511,7 +511,7 @@ int static_compress_each(const struct Param *param, STARSH_int i, STARSH_int j) 
         free(work);
         free(iwork);
 
-        far_rank[bi] = -1;
+//        far_rank[bi] = -1;
         // Compute elements of a block
         if (far_rank[bi] == -1 && !onfly) {
             memcpy(D, backup, (size_t)ncols * (size_t)nrows * sizeof(D));
@@ -690,11 +690,30 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                  *  PlasmaLower
                  */
                 if (uplo == PlasmaLower) {
-                    CORE_dsyrk(
-                            PlasmaLower, PlasmaNoTrans,
-                            tempkn, A.nb,
-                            -1.0, near_D[twoD_2_oneD(k, n)]->data, ldak,
-                            1.0, near_D[twoD_2_oneD(k, k)]->data, ldak);
+                    STARSH_int index = twoD_2_oneD(k, n);
+                    if (far_rank[index] == -1) {
+                        CORE_dsyrk(
+                                PlasmaLower, PlasmaNoTrans,
+                                tempkn, A.nb,
+                                -1.0, near_D[twoD_2_oneD(k, n)]->data, ldak,
+                                1.0, near_D[twoD_2_oneD(k, k)]->data, ldak);
+                    } else {
+                        int rank = far_rank[index];
+                        double *tmp1, *tmp2;
+                        tmp1 = malloc(rank * rank * sizeof(*tmp1));
+                        cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, rank, rank,
+                                    CC->size[n], 1., (double *)far_V[index]->data, CC->size[n], (double *)far_V[index]->data, CC->size[n], 0.,
+                                    tmp1, rank);
+                        tmp2 = malloc(rank * RC->size[k] * sizeof(*tmp1));
+                        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, rank, RC->size[k],
+                                    rank, 1., tmp1, rank, (double *)far_U[index]->data, RC->size[k], 0.,
+                                    tmp2, RC->size[k]);
+                        free(tmp1);
+                        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, RC->size[k], RC->size[k],
+                                    rank, -1., (double *)far_U[index]->data, RC->size[k], tmp2, RC->size[k], 1.,
+                                    near_D[twoD_2_oneD(k, k)]->data, ldam);
+                        free(tmp2);
+                    }
                 }
                     /*
                      *  PlasmaUpper
@@ -751,12 +770,55 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                  *  PlasmaLower
                  */
                 if (uplo == PlasmaLower) {
-                    CORE_dgemm(
-                            PlasmaNoTrans, PlasmaTrans,
-                            tempmn, A.nb, A.nb,
-                            mzone, near_D[twoD_2_oneD(m, n)]->data, ldam,
-                            near_D[twoD_2_oneD(k, n)]->data, ldak,
-                            zone, near_D[twoD_2_oneD(m, k)]->data, ldam);
+                    STARSH_int indexOfLHS = twoD_2_oneD(m, n), indexOfRHS = twoD_2_oneD(k, n);
+                    if (far_rank[indexOfLHS] == -1 && far_rank[indexOfRHS] == -1) {
+                        // all not low rank
+                        CORE_dgemm(
+                                PlasmaNoTrans, PlasmaTrans,
+                                tempmn, A.nb, A.nb,
+                                mzone, near_D[indexOfLHS]->data, ldam,
+                                near_D[indexOfRHS]->data, ldak,
+                                zone, near_D[twoD_2_oneD(m, k)]->data, ldam);
+                    } else if (far_rank[indexOfLHS] != -1 && far_rank[indexOfRHS] == -1) {
+                        // (m, n) is low rank, (k, n) is not
+                        int rank = far_rank[indexOfRHS];
+                        double *tmp = malloc(rank * CC->size[n] * sizeof(*tmp));
+                        cblas_dgemm(CblasColMajor, CblasTrans, CblasTrans, rank, RC->size[k],
+                                    CC->size[n], 1., (double *)far_V[indexOfLHS]->data, CC->size[n], near_D[indexOfRHS]->data, ldak, 0.,
+                                    tmp, CC->size[n]);
+                        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, RC->size[m], CC->size[n],
+                                    rank, -1., (double *)far_U[indexOfLHS]->data, RC->size[m], tmp, CC->size[n], 1.,
+                                    near_D[twoD_2_oneD(m, k)]->data, ldam);
+                        free(tmp);
+                    } else if (far_rank[indexOfLHS] == -1 && far_rank[indexOfRHS] != -1) {
+                        // (m, n) is low rank, (k, n) is not
+                        int rank = far_rank[indexOfLHS];
+                        double *tmp = malloc(rank * RC->size[m] * sizeof(*tmp));
+                        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, RC->size[m], rank,
+                                    CC->size[n], 1., near_D[indexOfLHS]->data, RC->size[m], (double *)far_V[indexOfRHS]->data, CC->size[n], 0,
+                                    tmp, RC->size[m]);
+                        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, RC->size[m], CC->size[n],
+                                    rank, -1., tmp, RC->size[m], (double *)far_U[indexOfRHS]->data, RC->size[k], 1.,
+                                    near_D[twoD_2_oneD(m, k)]->data, ldam);
+                        free(tmp);
+                    } else {
+                        int rankLHS = far_rank[indexOfLHS];
+                        int rankRHS = far_rank[indexOfRHS];
+                        double *tmp1, *tmp2;
+                        tmp1 = malloc(rankLHS * rankRHS * sizeof(*tmp1));
+                        cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, rankLHS, rankRHS,
+                                    CC->size[n], 1., (double *)far_V[indexOfLHS]->data, CC->size[n], (double *)far_V[indexOfRHS]->data, CC->size[n], 0.,
+                                    tmp1, rankLHS);
+                        tmp2 = malloc(rankLHS * RC->size[k] * sizeof(*tmp1));
+                        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, rankLHS, RC->size[k],
+                                    rankRHS, 1., tmp1, rankRHS, (double *)far_U[indexOfRHS]->data, RC->size[k], 0.,
+                                    tmp2, RC->size[k]);
+                        free(tmp1);
+                        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, RC->size[m], RC->size[k],
+                                    rankLHS, -1., (double *)far_U[indexOfLHS]->data, RC->size[m], tmp2, RC->size[k], 1.,
+                                    near_D[twoD_2_oneD(m, k)]->data, ldam);
+                        free(tmp2);
+                    }
                 }
                     /*
                      *  PlasmaUpper
@@ -926,6 +988,7 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
     STARSH_int *block_near = F->block_near;
     // Places to store low-rank factors, dense blocks and ranks
     Array **far_U = NULL, **far_V = NULL, **near_D = NULL;
+    struct starsh_block *block;
     int *far_rank = NULL;
     double *alloc_U = NULL, *alloc_V = NULL, *alloc_D = NULL;
     size_t offset_U = 0, offset_V = 0, offset_D = 0;
@@ -934,6 +997,7 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
     int BAD_TILE = 0;
     const int oversample = starsh_params.oversample;
     // Init buffers to store low-rank factors of far-field blocks if needed
+    STARSH_MALLOC(block, nblocks_far + nblocks_near);
     if (nblocks_far > 0) {
         STARSH_MALLOC(far_U, nblocks_far);
         STARSH_MALLOC(far_V, nblocks_far);
@@ -1002,9 +1066,15 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
         // to work normally
         STARSH_MALLOC(false_far, nblocks_false_far);
         bj = 0;
-        for (bi = 0; bi < nblocks_far; bi++)
-            if (far_rank[bi] == -1)
+        for (bi = 0; bi < nblocks_far; bi++) {
+            block[bi].rank = far_rank[bi];
+            if (far_rank[bi] == -1) {
+                block[bi].idx_in_near = bj;
                 false_far[bj++] = bi;
+            } else {
+                block[bi].idx_in_far = bi - bj;
+            }
+        }
     }
     // Update lists of far-field and near-field blocks using previously
     // generated list of false far-field blocks
@@ -1013,11 +1083,11 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
         new_nblocks_near = nblocks_near + nblocks_false_far;
         STARSH_MALLOC(block_near, 2 * new_nblocks_near);
         // At first get all near-field blocks, assumed to be dense
-#pragma omp parallel for schedule(static)
+//#pragma omp parallel for schedule(static)
         for (bi = 0; bi < 2 * nblocks_near; bi++)
             block_near[bi] = F->block_near[bi];
         // Add false far-field blocks
-#pragma omp parallel for schedule(static)
+//#pragma omp parallel for schedule(static)
         for (bi = 0; bi < nblocks_false_far; bi++) {
             STARSH_int bj = false_far[bi];
             block_near[2 * (bi + nblocks_near)] = F->block_far[2 * bj];
@@ -1141,6 +1211,7 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
                            alloc_U, alloc_V, (void *)1, '1');
     (*matrix)->alloc_D = NULL;
     (*matrix)->factorized = 1;
+    (*matrix)->block = block;
     return info;
 }
 
