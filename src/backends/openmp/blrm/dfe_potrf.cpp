@@ -40,17 +40,12 @@ double starsh_blrm__dfe_potrf_omp(STARSH_blrm *matrix)
     STARSH_int nblocks_far = F->nblocks_far;
     STARSH_int nblocks_near = F->nblocks_near, bi;
     STARSH_int nblocks = nblocks_far+nblocks_near;
-    // Shortcut to all U and V factors
-    Array **U = M->far_U, **V = M->far_V;
     const struct starsh_block * const block = M->block;
     // Special constant for symmetric case
-    double sqrt2 = sqrt(2.);
     // Temporary arrays to compute norms more precisely with dnrm2
-    double block_norm[nblocks], far_block_diff[nblocks_far];
+    double block_norm[nblocks];
     double *far_block_norm = block_norm;
     char symm = F->symm;
-    int info = 0;
-    auto infinityNorm = [](const auto &m) -> double { return m.rowwise().sum().array().abs().maxCoeff(); };
 
     if (M->factorized) {
         if (symm != 'S') {
