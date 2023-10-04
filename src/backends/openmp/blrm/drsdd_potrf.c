@@ -496,7 +496,7 @@ int static_compress_each(const struct Param *param, STARSH_int i, STARSH_int j) 
         STARSH_PMALLOC(work, lwork, info);
         STARSH_PMALLOC(iwork, liwork, info);
         STARSH_PMALLOC(backup, (size_t)ncols * (size_t)nrows, info);
-        memcpy(backup, D, (size_t)ncols * (size_t)nrows * sizeof(D));
+        memcpy(backup, D, (size_t)ncols * (size_t)nrows * sizeof(*D));
 
         double time1 = omp_get_wtime();
         starsh_dense_dlrrsdd(nrows, ncols, D, nrows, far_U[bi]->data, nrows,
@@ -511,10 +511,10 @@ int static_compress_each(const struct Param *param, STARSH_int i, STARSH_int j) 
         free(work);
         free(iwork);
 
-//        far_rank[bi] = -1;
+        far_rank[bi] = -1;
         // Compute elements of a block
         if (far_rank[bi] == -1 && !onfly) {
-            memcpy(D, backup, (size_t)ncols * (size_t)nrows * sizeof(D));
+            memcpy(D, backup, (size_t)ncols * (size_t)nrows * sizeof(*D));
         } else {
             free(D);
             near_D[bi]->data = NULL;
@@ -781,7 +781,7 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                                 zone, near_D[twoD_2_oneD(m, k)]->data, ldam);
                     } else if (far_rank[indexOfLHS] != -1 && far_rank[indexOfRHS] == -1) {
                         // (m, n) is low rank, (k, n) is not
-                        int rank = far_rank[indexOfRHS];
+                        int rank = far_rank[indexOfLHS];
                         double *tmp = malloc(rank * CC->size[n] * sizeof(*tmp));
                         cblas_dgemm(CblasColMajor, CblasTrans, CblasTrans, rank, RC->size[k],
                                     CC->size[n], 1., (double *)far_V[indexOfLHS]->data, CC->size[n], near_D[indexOfRHS]->data, ldak, 0.,
@@ -791,8 +791,8 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                                     near_D[twoD_2_oneD(m, k)]->data, ldam);
                         free(tmp);
                     } else if (far_rank[indexOfLHS] == -1 && far_rank[indexOfRHS] != -1) {
-                        // (m, n) is low rank, (k, n) is not
-                        int rank = far_rank[indexOfLHS];
+                        // (m, n) is not low rank, (k, n) is
+                        int rank = far_rank[indexOfRHS];
                         double *tmp = malloc(rank * RC->size[m] * sizeof(*tmp));
                         cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, RC->size[m], rank,
                                     CC->size[n], 1., near_D[indexOfLHS]->data, RC->size[m], (double *)far_V[indexOfRHS]->data, CC->size[n], 0,

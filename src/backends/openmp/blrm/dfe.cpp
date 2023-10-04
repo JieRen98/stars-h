@@ -124,9 +124,9 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
                         Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> left{
                                 (double *) M->near_D[nearIdxLHS]->data, R->size[i], C->size[k]};
                         Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> U{
-                                (double *) M->far_U[farIdxRHS]->data, R->size[j], rankLHS};
+                                (double *) M->far_U[farIdxRHS]->data, R->size[j], rankRHS};
                         Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> V{
-                                (double *) M->far_V[farIdxRHS]->data, C->size[k], rankLHS};
+                                (double *) M->far_V[farIdxRHS]->data, C->size[k], rankRHS};
                         computed += left * (U * V.transpose()).transpose();
                     } else {
                         auto farIdxLHS = block[indexLHS].idx_in_far;
@@ -172,7 +172,7 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
 
                 near_block_norm[twoD_2_oneD(i, j)] = infinityNorm(ref - computed);
 
-//                printf("(%zd, %zd): %e\n", i, j, near_block_norm[bi]);
+//                printf("(%zd, %zd): %e\n", i, j, near_block_norm[twoD_2_oneD(i, j)]);
                 // Free temporary buffer
                 free(D);
 //            near_block_norm[bi] = cblas_dnrm2(ncols, D_norm, 1);
