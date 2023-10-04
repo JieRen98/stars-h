@@ -99,5 +99,9 @@ int main(int argc, char **argv)
     // Show realtive error of approximation in Frobenius norm
     starsh_blrm__dfe_potrf_omp(matrix);
     starsh_blrm_free(matrix);
+    free(format->block_near);
+    free(format->brow_near);
+    free(format->brow_near_start);
+    free(format);
     return 0;
 }
