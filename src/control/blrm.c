@@ -138,9 +138,22 @@ void starsh_blrm_free(STARSH_blrm *matrix)
     STARSH_blrf *F = M->format;
     STARSH_int bi;
     int info;
+    if (matrix->factorized) {
+        free(matrix->block);
+    }
     if(F->nblocks_far > 0)
     {
-        if(M->alloc_type == '1')
+        if (matrix->factorized) {
+            free(M->alloc_U);
+            free(M->alloc_V);
+            for(bi = 0; bi < F->nblocks_far; bi++)
+            {
+                M->far_U[bi]->data = NULL;
+                array_free(M->far_U[bi]);
+                M->far_V[bi]->data = NULL;
+                array_free(M->far_V[bi]);
+            }
+        } else if(M->alloc_type == '1')
         {
             free(M->alloc_U);
             free(M->alloc_V);
@@ -166,13 +179,11 @@ void starsh_blrm_free(STARSH_blrm *matrix)
     }
     if(F->nblocks_near > 0 && M->onfly == 0)
     {
-        if (1) {
-            for(bi = 0; bi < F->nblocks_near; bi++)
-            {
+        if (matrix->factorized) {
+            for(bi = 0; bi < F->nblocks_near; bi++) {
                 array_free(M->near_D[bi]);
             }
-        } else
-        if(M->alloc_type == '1')
+        } else if(M->alloc_type == '1')
         {
             free(M->alloc_D);
             for(bi = 0; bi < F->nblocks_near; bi++)

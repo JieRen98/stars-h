@@ -511,13 +511,13 @@ int static_compress_each(const struct Param *param, STARSH_int i, STARSH_int j) 
         free(work);
         free(iwork);
 
+//        if (i == j + 1)
         far_rank[bi] = -1;
         // Compute elements of a block
         if (far_rank[bi] == -1 && !onfly) {
             memcpy(D, backup, (size_t)ncols * (size_t)nrows * sizeof(*D));
         } else {
-            free(D);
-            near_D[bi]->data = NULL;
+            array_free(near_D[bi]);
         }
         free(backup);
     }
@@ -1171,12 +1171,22 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
             else {
                 int shape_U[2] = {far_U[bi]->shape[0], far_rank[bi]};
                 int shape_V[2] = {far_V[bi]->shape[0], far_rank[bi]};
+                far_V[bi - bj]->data = NULL;
+                far_U[bi - bj]->data = NULL;
+                array_free(far_V[bi - bj]);
+                array_free(far_U[bi - bj]);
                 array_from_buffer(far_U + bi - bj, 2, shape_U, 'd', 'F',
                                   far_U[bi]->data);
                 array_from_buffer(far_V + bi - bj, 2, shape_V, 'd', 'F',
                                   far_V[bi]->data);
                 far_rank[bi - bj] = far_rank[bi];
             }
+        }
+        for (STARSH_int i = new_nblocks_far; i < nblocks_far; ++i) {
+            far_V[i]->data = NULL;
+            far_U[i]->data = NULL;
+            array_free(far_V[i]);
+            array_free(far_U[i]);
         }
         STARSH_REALLOC(far_rank, new_nblocks_far);
         STARSH_REALLOC(far_U, new_nblocks_far);
@@ -1189,6 +1199,12 @@ int starsh_blrm__drsdd_potrf_omp(STARSH_blrm **matrix, STARSH_blrf *format,
         block_far = NULL;
         free(far_rank);
         far_rank = NULL;
+        for (int i = 0; i < nblocks_far; ++i) {
+            far_U[i]->data = NULL;
+            far_V[i]->data = NULL;
+            array_free(far_U[i]);
+            array_free(far_V[i]);
+        }
         free(far_U);
         far_U = NULL;
         free(far_V);

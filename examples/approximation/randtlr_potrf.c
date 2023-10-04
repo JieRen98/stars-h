@@ -98,5 +98,6 @@ int main(int argc, char **argv)
     starsh_blrm_info(matrix); // Show info about approximation
     // Show realtive error of approximation in Frobenius norm
     starsh_blrm__dfe_omp(matrix);
+    starsh_blrm_free(matrix);
     return 0;
 }
