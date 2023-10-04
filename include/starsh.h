@@ -631,6 +631,7 @@ int starsh_blrm__dmml_omp(STARSH_blrm *matrix, int nrhs, double alpha,
 
 double starsh_blrm__dfe(STARSH_blrm *matrix);
 double starsh_blrm__dfe_omp(STARSH_blrm *matrix);
+double starsh_blrm__dfe_potrf_omp(STARSH_blrm *matrix);
 
 // This function should not be in this group, but it is for now.
 int starsh_blrm__dca(STARSH_blrm *matrix, Array *A);

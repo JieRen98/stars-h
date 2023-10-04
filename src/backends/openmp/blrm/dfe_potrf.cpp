@@ -18,7 +18,7 @@ extern "C" {
 #include <Eigen/Core>
 #include <iostream>
 
-double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
+double starsh_blrm__dfe_potrf_omp(STARSH_blrm *matrix)
 //! Approximation error in Frobenius norm of double precision matrix.
 /*! Measure error of approximation of a dense matrix by block-wise low-rank
  * matrix.
