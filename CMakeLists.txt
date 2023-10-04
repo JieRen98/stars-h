@@ -27,6 +27,7 @@
 enable_language(CXX)
 enable_language(C)
 add_subdirectory(third_party/plasma)
+add_subdirectory(third_party/eigen)
 
 # Need to identify lowest possible CMake version
 cmake_minimum_required(VERSION 3.2.3)

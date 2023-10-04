@@ -14,12 +14,10 @@
 set(SRC)
 add_subdirectory("blrm")
 
-find_package(Eigen3 REQUIRED)
-
 # Compilation of OpenMP is always required
 add_library(backends_openmp OBJECT ${SRC})
 target_compile_options(backends_openmp PUBLIC "${OpenMP_C_FLAGS}")
 target_include_directories(backends_openmp PRIVATE ../../../third_party/ ../../../third_party/plasma/quark ../../../third_party/plasma/include)
-target_include_directories(backends_openmp PRIVATE ../../../third_party/eigen/)
+target_link_libraries(backends_openmp PRIVATE Eigen3::Eigen)
 # Put doxygen input to parent scope
 set(DOXYGEN_INPUT ${DOXYGEN_INPUT} ${SRC} PARENT_SCOPE)
