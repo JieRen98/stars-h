@@ -48,7 +48,6 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
     // Temporary arrays to compute norms more precisely with dnrm2
     double block_norm[nblocks], far_block_diff[nblocks_far];
     double *far_block_norm = block_norm;
-    double *near_block_norm = block_norm+nblocks_far;
     char symm = F->symm;
     int info = 0;
     auto infinityNorm = [](const auto &m) -> double { return m.rowwise().sum().array().abs().maxCoeff(); };
@@ -67,9 +66,11 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
             m.triangularView<Eigen::StrictlyUpper>().setZero();
         }
 
-        near_block_norm = new double[(R->nblocks + 1) * C->nblocks / 2];
+        double FNorm = 0;
 
         for(STARSH_int i = 0; i < R->nblocks; i++) {
+            Eigen::Matrix<double, Eigen::Dynamic, 1> blockFNorm{R->size[i]};
+            blockFNorm.setZero();
             for(STARSH_int j = 0; j <= i; j++) {
 //            if(info != 0)
 //                continue;
@@ -170,7 +171,8 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
 //                    std::cout << "UVT" << std::endl << U * V.transpose() << std::endl;
 //                }
 
-                near_block_norm[twoD_2_oneD(i, j)] = infinityNorm(ref - computed);
+//                near_block_norm[twoD_2_oneD(i, j)] = infinityNorm(ref - computed);
+                blockFNorm += (ref - computed).array().abs().rowwise().sum().matrix();
 
 //                printf("(%zd, %zd): %e\n", i, j, near_block_norm[twoD_2_oneD(i, j)]);
                 // Free temporary buffer
@@ -180,9 +182,9 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
 //                // Multiply by square root of 2 ub symmetric case
 //                near_block_norm[bi] *= sqrt2;
             }
+            FNorm = std::max(FNorm, blockFNorm.maxCoeff());
         }
-        printf("Near block norm %e\n", cblas_dnrm2((R->nblocks + 1) * C->nblocks / 2, near_block_norm, 1));
-        delete[] near_block_norm;
+        printf("Inf norm %e\n", FNorm);
         return 0;
     }
     // Simple cycle over all far-field blocks
@@ -233,59 +235,59 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
 //    if(info != 0)
 //        return -1; // Need to rework this (since double is returned,
 //                    // not Error code)
-    if(0)
-        // Simple cycle over all near-field blocks
-        #pragma omp parallel for schedule(dynamic, 1)
-        for(bi = 0; bi < nblocks_near; bi++)
-        {
-            // Get indexes and sizes of corresponding block row and column
-            STARSH_int i = F->block_near[2*bi];
-            STARSH_int j = F->block_near[2*bi+1];
-            int nrows = R->size[i];
-            int ncols = C->size[j];
-            // Compute norm of a block
-            double *D = (double *)M->near_D[bi]->data, D_norm[ncols];
-            for(size_t k = 0; k < ncols; k++)
-                D_norm[k] = cblas_dnrm2(nrows, D+k*nrows, 1);
-            near_block_norm[bi] = cblas_dnrm2(ncols, D_norm, 1);
-            if(i != j && symm == 'S')
-                // Multiply by square root of 2 in symmetric case
-                near_block_norm[bi] *= sqrt2;
-        }
-    else
-        // Simple cycle over all near-field blocks
+//    if(0)
+//        // Simple cycle over all near-field blocks
 //        #pragma omp parallel for schedule(dynamic, 1)
-        for(bi = 0; bi < nblocks_near; bi++)
-        {
-//            if(info != 0)
-//                continue;
-            // Get indexes and sizes of corresponding block row and column
-            STARSH_int i = F->block_near[2*bi];
-            STARSH_int j = F->block_near[2*bi+1];
-            int nrows = R->size[i];
-            int ncols = C->size[j];
-            double *D, D_norm[ncols];
-            // Allocate temporary array and fill it with elements of a block
-            STARSH_PMALLOC(D, (size_t)nrows*(size_t)ncols, info);
-            kernel(nrows, ncols, R->pivot+R->start[i], C->pivot+C->start[j],
-                    RD, CD, D, nrows);
-
-            Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> ref{D, nrows, ncols};
-            Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> computed{(double *)M->near_D[bi]->data, nrows, ncols};
-
-            // Compute norm of a block
-            for(size_t k = 0; k < ncols; k++)
-                D_norm[k] = cblas_dnrm2(nrows, D+k*nrows, 1);
-
-
-            near_block_norm[bi] = infinityNorm(ref - computed);
-            // Free temporary buffer
-            free(D);
+//        for(bi = 0; bi < nblocks_near; bi++)
+//        {
+//            // Get indexes and sizes of corresponding block row and column
+//            STARSH_int i = F->block_near[2*bi];
+//            STARSH_int j = F->block_near[2*bi+1];
+//            int nrows = R->size[i];
+//            int ncols = C->size[j];
+//            // Compute norm of a block
+//            double *D = (double *)M->near_D[bi]->data, D_norm[ncols];
+//            for(size_t k = 0; k < ncols; k++)
+//                D_norm[k] = cblas_dnrm2(nrows, D+k*nrows, 1);
 //            near_block_norm[bi] = cblas_dnrm2(ncols, D_norm, 1);
 //            if(i != j && symm == 'S')
-//                // Multiply by square root of 2 ub symmetric case
+//                // Multiply by square root of 2 in symmetric case
 //                near_block_norm[bi] *= sqrt2;
-        }
+//        }
+//    else
+        // Simple cycle over all near-field blocks
+//        #pragma omp parallel for schedule(dynamic, 1)
+//        for(bi = 0; bi < nblocks_near; bi++)
+//        {
+////            if(info != 0)
+////                continue;
+//            // Get indexes and sizes of corresponding block row and column
+//            STARSH_int i = F->block_near[2*bi];
+//            STARSH_int j = F->block_near[2*bi+1];
+//            int nrows = R->size[i];
+//            int ncols = C->size[j];
+//            double *D, D_norm[ncols];
+//            // Allocate temporary array and fill it with elements of a block
+//            STARSH_PMALLOC(D, (size_t)nrows*(size_t)ncols, info);
+//            kernel(nrows, ncols, R->pivot+R->start[i], C->pivot+C->start[j],
+//                    RD, CD, D, nrows);
+//
+//            Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> ref{D, nrows, ncols};
+//            Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> computed{(double *)M->near_D[bi]->data, nrows, ncols};
+//
+//            // Compute norm of a block
+//            for(size_t k = 0; k < ncols; k++)
+//                D_norm[k] = cblas_dnrm2(nrows, D+k*nrows, 1);
+//
+//
+//            near_block_norm[bi] = infinityNorm(ref - computed);
+//            // Free temporary buffer
+////            free(D);
+////            near_block_norm[bi] = cblas_dnrm2(ncols, D_norm, 1);
+////            if(i != j && symm == 'S')
+////                // Multiply by square root of 2 ub symmetric case
+////                near_block_norm[bi] *= sqrt2;
+//        }
 //    if(info != 0)
 //        return -1; // Need to rework this, since returned value is double,
                     // not error code
@@ -293,7 +295,7 @@ double starsh_blrm__dfe_omp(STARSH_blrm *matrix)
 //    double diff = cblas_dnrm2(nblocks_far, far_block_diff, 1);
     // Get norm of initial matrix
 //    double norm = cblas_dnrm2(nblocks, block_norm, 1);
-    printf("Far block norm %e\n", cblas_dnrm2(nblocks_far, far_block_norm, 1));
-    printf("Near block norm %e\n", cblas_dnrm2(nblocks_near, near_block_norm, 1));
+//    printf("Far block norm %e\n", cblas_dnrm2(nblocks_far, far_block_norm, 1));
+//    printf("Near block norm %e\n", cblas_dnrm2(nblocks_near, near_block_norm, 1));
     return 0;
 }
