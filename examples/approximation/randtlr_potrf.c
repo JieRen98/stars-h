@@ -103,5 +103,8 @@ int main(int argc, char **argv)
     free(format->brow_near);
     free(format->brow_near_start);
     free(format);
+    starsh_cluster_free(cluster);
+    starsh_problem_free(problem);
+    starsh_randtlr_free(data);
     return 0;
 }
