@@ -46,6 +46,7 @@ double starsh_blrm__dfe_potrf_omp(STARSH_blrm *matrix)
     double block_norm[nblocks];
     double *far_block_norm = block_norm;
     char symm = F->symm;
+    int info = 0;
 
     if (M->factorized) {
         if (symm != 'S') {
