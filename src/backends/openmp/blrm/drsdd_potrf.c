@@ -691,6 +691,9 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                  */
                 if (uplo == PlasmaLower) {
                     STARSH_int index = twoD_2_oneD(k, n);
+                    if (near_D[twoD_2_oneD(k, k)] == NULL) {
+                        static_malloc_each(param, k, k);
+                    }
                     if (far_rank[index] == -1) {
                         CORE_dsyrk(
                                 PlasmaLower, PlasmaNoTrans,
@@ -743,9 +746,6 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                             zone, near_D[twoD_2_oneD(k, k)]->data, ldak,
                             near_D[twoD_2_oneD(m, k)]->data, ldam);
                     static_compress_each(param, m, k);
-                    if (k != (A.nt - 1)) {
-                        static_malloc_each(param, m, k + 1);
-                    }
 //                    CORE_dtrsm(
 //                            PlasmaRight, PlasmaLower, PlasmaTrans, PlasmaNonUnit,
 //                            tempmn, A.nb,
@@ -770,6 +770,9 @@ void drsdd_pdpotrf_testing(plasma_context_t *plasma) {
                  *  PlasmaLower
                  */
                 if (uplo == PlasmaLower) {
+                    if (near_D[twoD_2_oneD(m, k)] == NULL) {
+                        static_malloc_each(param, m, k);
+                    }
                     STARSH_int indexOfLHS = twoD_2_oneD(m, n), indexOfRHS = twoD_2_oneD(k, n);
                     if (far_rank[indexOfLHS] == -1 && far_rank[indexOfRHS] == -1) {
                         // all not low rank
@@ -904,6 +907,7 @@ int OURS_dpotrf(PLASMA_enum uplo, struct Param *param) {
     double kernel_time;
     int BAD_TILE;
     near_D = malloc(nblocks_far * sizeof(*near_D));
+    memset(near_D, 0, nblocks_far * sizeof(*near_D));
     param->near_D = near_D;
 
     int NB;
@@ -932,9 +936,8 @@ int OURS_dpotrf(PLASMA_enum uplo, struct Param *param) {
     /* Call the tile interface */
     OURS_dpotrf_Tile_Async(uplo, sequence, &request);
 
-    plasma_dynamic_sync();
-
     status = sequence->status;
+    plasma_sequence_wait(plasma, sequence);
     plasma_sequence_destroy(plasma, sequence);
 
     STARSH_int near_D_counter = 0;
